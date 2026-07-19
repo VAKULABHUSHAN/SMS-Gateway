@@ -7,7 +7,15 @@ class ServerService {
   HttpServer? _server;
   final SmsService _smsService = SmsService();
 
-  Future<void> start({Function(int)? onRequestReceived}) async {
+  Future<void> start({
+    required Function(
+      String method,
+      String path,
+      String clientIp,
+      String details,
+      bool success,
+    ) onRequestReceived,
+  }) async {
     if (_server != null) return;
 
     try {
@@ -17,7 +25,7 @@ class ServerService {
       );
 
       _server!.listen((HttpRequest request) async {
-        onRequestReceived?.call(1);
+        final clientIp = request.connectionInfo?.remoteAddress.address ?? "Unknown";
 
         if (request.method == "GET" && request.uri.path == "/") {
           request.response
@@ -25,26 +33,54 @@ class ServerService {
             ..headers.contentType = ContentType.text
             ..write("${AppConfig.appName} Running 🚀");
           await request.response.close();
+          
+          onRequestReceived(
+            "GET",
+            "/",
+            clientIp,
+            "Health check ping",
+            true,
+          );
           return;
         }
 
         if (request.method == "POST" && request.uri.path == "/send") {
+          String? details;
+          bool isSuccess = false;
           try {
             final body = await utf8.decoder.bind(request).join();
             final data = jsonDecode(body);
+            final number = data["number"]?.toString() ?? "";
+            final message = data["message"]?.toString() ?? "";
 
-            final result = await _smsService.sendSms(
-              number: data["number"],
-              message: data["message"],
-            );
+            if (number.isEmpty || message.isEmpty) {
+              request.response
+                ..statusCode = HttpStatus.badRequest
+                ..headers.contentType = ContentType.json
+                ..write(jsonEncode({
+                  "success": false,
+                  "error": "Number or message is empty",
+                }));
+              details = "Validation failed: Empty number or message";
+            } else {
+              final result = await _smsService.sendSms(
+                number: number,
+                message: message,
+              );
+              
+              final isError = result.startsWith("Platform Error") || result.startsWith("Unexpected Error");
 
-            request.response
-              ..statusCode = HttpStatus.ok
-              ..headers.contentType = ContentType.json
-              ..write(jsonEncode({
-                "success": true,
-                "result": result,
-              }));
+              request.response
+                ..statusCode = isError ? HttpStatus.internalServerError : HttpStatus.ok
+                ..headers.contentType = ContentType.json
+                ..write(jsonEncode({
+                  "success": !isError,
+                  "result": result,
+                }));
+              
+              details = isError ? result : "SMS sent to $number";
+              isSuccess = !isError;
+            }
           } catch (e) {
             request.response
               ..statusCode = HttpStatus.internalServerError
@@ -53,8 +89,18 @@ class ServerService {
                 "success": false,
                 "error": e.toString(),
               }));
+            details = "Error: ${e.toString()}";
+            isSuccess = false;
           }
           await request.response.close();
+          
+          onRequestReceived(
+            "POST",
+            "/send",
+            clientIp,
+            details,
+            isSuccess,
+          );
           return;
         }
 
@@ -62,6 +108,14 @@ class ServerService {
           ..statusCode = HttpStatus.notFound
           ..write("Not Found");
         await request.response.close();
+
+        onRequestReceived(
+          request.method,
+          request.uri.path,
+          clientIp,
+          "Route not found (404)",
+          false,
+        );
       });
     } catch (e) {
       rethrow;
