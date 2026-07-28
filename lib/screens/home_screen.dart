@@ -139,10 +139,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _sendTestSms() async {
-    final number = _phoneController.text.trim();
+    final numbersText = _phoneController.text.trim();
     final message = _messageController.text.trim();
 
-    if (number.isEmpty) {
+    if (numbersText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Please enter a phone number"),
@@ -152,36 +152,44 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    final numbers = numbersText.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
     _addLog(
       "TEST",
-      "/send",
+      numbers.length > 1 ? "/send_bulk" : "/send",
       "Local UI",
-      "Initiating mock SMS transmission to $number...",
+      "Initiating mock SMS transmission to ${numbers.join(', ')}...",
       true,
       LogType.info,
     );
 
-    final result = await _smsService.sendSms(
-      number: number,
-      message: message,
-    );
-
-    final isError = result.contains("Platform Error") || result.contains("Unexpected Error");
-
-    _addLog(
-      "TEST",
-      "/send",
-      "Local UI",
-      result,
-      !isError,
-      isError ? LogType.error : LogType.request,
-    );
+    int successCount = 0;
+    for (var num in numbers) {
+      final result = await _smsService.sendSms(
+        number: num,
+        message: message,
+      );
+      final isError = result.contains("Platform Error") || result.contains("Unexpected Error");
+      if (!isError) successCount++;
+      _addLog(
+        "TEST",
+        numbers.length > 1 ? "/send_bulk" : "/send",
+        "Local UI",
+        result,
+        !isError,
+        isError ? LogType.error : LogType.request,
+      );
+    }
 
     if (!mounted) return;
+    final finalResult = numbers.length == 1 
+      ? (successCount == 1 ? "SMS Sent Successfully" : "Failed to send SMS") 
+      : "Sent $successCount/${numbers.length} messages";
+      
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result),
-        backgroundColor: isError ? Colors.red.shade900 : const Color(0xFF10B981),
+        content: Text(finalResult),
+        backgroundColor: successCount == numbers.length ? const Color(0xFF10B981) : Colors.amber.shade900,
       ),
     );
   }
@@ -217,6 +225,20 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'curl -X POST $url \\\n'
         '  -H "Content-Type: application/json" \\\n'
         '  -d \'{"number": "+1234567890", "message": "Hello from API!"}\'';
+  }
+
+  String _getBulkGatewayUrl() {
+    final ip = _serverRunning
+        ? (_ipAddress == "Stopped" ? "192.160.29.123" : _ipAddress)
+        : "192.160.29.123";
+    return "http://$ip:${AppConfig.defaultPort}/send_bulk";
+  }
+
+  String _getBulkCurlSnippet() {
+    final url = _getBulkGatewayUrl();
+    return 'curl -X POST $url \\\n'
+        '  -H "Content-Type: application/json" \\\n'
+        '  -d \'{"numbers": ["+1234567890", "+0987654321"], "message": "Bulk Hello!"}\'';
   }
 
   String _formatTime(DateTime dt) {
@@ -330,7 +352,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Container(
                     decoration: BoxDecoration(
                       color: _serverRunning
-                          ? const Color(0xFF10B981).withOpacity(0.1)
+                          ? const Color(0xFF10B981).withValues(alpha: 0.1)
                           : const Color(0xFF334155),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -459,13 +481,18 @@ class _HomeScreenState extends State<HomeScreen> {
       margin: EdgeInsets.zero,
       child: ExpansionTile(
         title: const Text(
-          "Developer API Snippet (cURL)",
+          "Developer API Snippets (cURL)",
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
         ),
         leading: const Icon(Icons.code, color: Color(0xFF10B981)),
         shape: const Border(),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text("Single SMS (/send)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8))),
+          ),
+          const SizedBox(height: 8),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -488,9 +515,43 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               TextButton.icon(
-                onPressed: () => _copyToClipboard(_getCurlSnippet(), "Copied cURL command to Clipboard"),
+                onPressed: () => _copyToClipboard(_getCurlSnippet(), "Copied /send command to Clipboard"),
                 icon: const Icon(Icons.copy_rounded, size: 16),
-                label: const Text("Copy Command", style: TextStyle(fontSize: 12)),
+                label: const Text("Copy", style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text("Bulk SMS (/send_bulk)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8))),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF334155)),
+            ),
+            child: Text(
+              _getBulkCurlSnippet(),
+              style: const TextStyle(
+                fontFamily: 'Courier',
+                fontSize: 11,
+                color: Color(0xFF38BDF8),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => _copyToClipboard(_getBulkCurlSnippet(), "Copied /send_bulk command to Clipboard"),
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                label: const Text("Copy", style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
@@ -521,8 +582,8 @@ class _HomeScreenState extends State<HomeScreen> {
             TextField(
               controller: _phoneController,
               decoration: const InputDecoration(
-                labelText: "Recipient Number",
-                hintText: "+1234567890",
+                labelText: "Recipient Number(s)",
+                hintText: "+1234567890, +0987654321",
                 prefixIcon: Icon(Icons.phone, size: 20),
                 contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
@@ -660,7 +721,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
             decoration: BoxDecoration(
-              color: typeColor.withOpacity(0.15),
+              color: typeColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
@@ -743,7 +804,7 @@ class _PulsingIndicatorState extends State<PulsingIndicator> with SingleTickerPr
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF10B981).withOpacity(0.5),
+                color: const Color(0xFF10B981).withValues(alpha: 0.5),
                 blurRadius: _animation.value,
                 spreadRadius: _animation.value / 2.5,
               )

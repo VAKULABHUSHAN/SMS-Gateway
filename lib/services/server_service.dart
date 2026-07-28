@@ -104,6 +104,79 @@ class ServerService {
           return;
         }
 
+        if (request.method == "POST" && request.uri.path == "/send_bulk") {
+          String? details;
+          bool isSuccess = false;
+          try {
+            final body = await utf8.decoder.bind(request).join();
+            final data = jsonDecode(body);
+            final numbers = data["numbers"];
+            final message = data["message"]?.toString() ?? "";
+
+            if (numbers == null || numbers is! List || numbers.isEmpty || message.isEmpty) {
+              request.response
+                ..statusCode = HttpStatus.badRequest
+                ..headers.contentType = ContentType.json
+                ..write(jsonEncode({
+                  "success": false,
+                  "error": "Numbers array or message is empty/invalid",
+                }));
+              details = "Validation failed: Invalid numbers array or message";
+            } else {
+              List<Map<String, dynamic>> results = [];
+              int successCount = 0;
+              
+              for (var num in numbers) {
+                final numberStr = num.toString();
+                final result = await _smsService.sendSms(
+                  number: numberStr,
+                  message: message,
+                );
+                final isError = result.startsWith("Platform Error") || result.startsWith("Unexpected Error");
+                if (!isError) successCount++;
+                results.add({
+                  "number": numberStr,
+                  "success": !isError,
+                  "result": result,
+                });
+              }
+
+              request.response
+                ..statusCode = HttpStatus.ok
+                ..headers.contentType = ContentType.json
+                ..write(jsonEncode({
+                  "success": successCount > 0,
+                  "total": numbers.length,
+                  "sent": successCount,
+                  "results": results,
+                }));
+              
+              details = "Bulk SMS sent to $successCount/${numbers.length} numbers";
+              isSuccess = true;
+            }
+          } catch (e) {
+            request.response
+              ..statusCode = HttpStatus.internalServerError
+              ..headers.contentType = ContentType.json
+              ..write(jsonEncode({
+                "success": false,
+                "error": e.toString(),
+              }));
+            details = "Error: ${e.toString()}";
+            isSuccess = false;
+          }
+          await request.response.close();
+          
+          onRequestReceived(
+            "POST",
+            "/send_bulk",
+            clientIp,
+            details,
+            isSuccess,
+          );
+          return;
+        }
+
         request.response
           ..statusCode = HttpStatus.notFound
           ..write("Not Found");
