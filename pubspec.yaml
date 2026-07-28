@@ -13,6 +13,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_dotenv: ^5.1.0
   network_info_plus: ^6.0.0
+  flutter_native_contact_picker: ^0.0.11
 
 dev_dependencies:
   flutter_test:

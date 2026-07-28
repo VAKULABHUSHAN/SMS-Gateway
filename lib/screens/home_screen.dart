@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_native_contact_picker/flutter_native_contact_picker.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import '../services/sms_service.dart';
 import '../services/server_service.dart';
@@ -42,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final ServerService _serverService = ServerService();
   final SmsService _smsService = SmsService();
   final NetworkInfo _networkInfo = NetworkInfo();
+  final FlutterNativeContactPicker _contactPicker = FlutterNativeContactPicker();
 
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _messageController =
@@ -581,11 +583,29 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 14),
             TextField(
               controller: _phoneController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "Recipient Number(s)",
                 hintText: "+1234567890, +0987654321",
-                prefixIcon: Icon(Icons.phone, size: 20),
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                prefixIcon: const Icon(Icons.phone, size: 20),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.contacts_rounded, color: Color(0xFF10B981)),
+                  onPressed: () async {
+                    final contact = await _contactPicker.selectContact();
+                    if (contact != null && contact.phoneNumbers != null && contact.phoneNumbers!.isNotEmpty) {
+                      String phone = contact.phoneNumbers!.first;
+                      // Keep only digits and the '+' sign
+                      phone = phone.replaceAll(RegExp(r'[^\d+]'), '');
+                      setState(() {
+                        if (_phoneController.text.isEmpty) {
+                          _phoneController.text = phone;
+                        } else {
+                          _phoneController.text += ", $phone";
+                        }
+                      });
+                    }
+                  },
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               keyboardType: TextInputType.phone,
             ),
