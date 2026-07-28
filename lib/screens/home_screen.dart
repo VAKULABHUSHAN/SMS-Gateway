@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_native_contact_picker/flutter_native_contact_picker.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/sms_service.dart';
 import '../services/server_service.dart';
 import '../models/config.dart';
@@ -194,6 +195,47 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: successCount == numbers.length ? const Color(0xFF10B981) : Colors.amber.shade900,
       ),
     );
+  }
+
+  Future<void> _sendTestWhatsapp() async {
+    final numbersText = _phoneController.text.trim();
+    final message = _messageController.text.trim();
+
+    if (numbersText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please enter a phone number"),
+          backgroundColor: Colors.amber,
+        ),
+      );
+      return;
+    }
+
+    final numbers = numbersText.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    if (numbers.isEmpty) return;
+    
+    // WhatsApp intent typically supports one number at a time
+    final number = numbers.first.replaceAll(RegExp(r'[^\d+]'), '');
+    final uri = Uri.parse("whatsapp://send?phone=$number&text=${Uri.encodeComponent(message)}");
+    
+    _addLog("TEST", "whatsapp", "Local UI", "Launching WhatsApp for $number...", true, LogType.info);
+
+    try {
+      final launched = await launchUrl(uri);
+      if (!launched) {
+        throw "Could not launch WhatsApp. Is it installed?";
+      }
+    } catch (e) {
+      _addLog("TEST", "whatsapp", "Local UI", e.toString(), false, LogType.error);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString()),
+            backgroundColor: Colors.red.shade900,
+          ),
+        );
+      }
+    }
   }
 
   void _copyToClipboard(String text, String successMessage) {
@@ -620,10 +662,27 @@ class _HomeScreenState extends State<HomeScreen> {
               maxLines: 2,
             ),
             const SizedBox(height: 14),
-            ElevatedButton.icon(
-              onPressed: _sendTestSms,
-              icon: const Icon(Icons.rocket_launch_rounded, size: 18),
-              label: const Text("DISPATCH MOCK SMS"),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _sendTestSms,
+                    icon: const Icon(Icons.rocket_launch_rounded, size: 18),
+                    label: const Text("SMS"),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _sendTestWhatsapp,
+                    icon: const Icon(Icons.chat_rounded, size: 18),
+                    label: const Text("WHATSAPP"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
