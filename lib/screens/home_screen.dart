@@ -36,10 +36,17 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _serverRunning = false;
   String _ipAddress = "Stopped";
   int _requests = 0;
+
+  bool _isWhatsappBulkMode = false;
+  bool _waitingForWhatsAppReturn = false;
+  List<String> _whatsappQueue = [];
+  String _whatsappMessage = "";
+  int _whatsappSuccessCount = 0;
+  int _whatsappTotalCount = 0;
 
   final ServerService _serverService = ServerService();
   final SmsService _smsService = SmsService();
@@ -53,10 +60,32 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<LogEntry> _logs = [];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _phoneController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _isWhatsappBulkMode && _waitingForWhatsAppReturn) {
+      _waitingForWhatsAppReturn = false;
+      if (_whatsappQueue.isNotEmpty) {
+        _whatsappQueue.removeAt(0);
+      }
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && _isWhatsappBulkMode) {
+          _launchNextWhatsappQueueItem();
+        }
+      });
+    }
   }
 
   Future<void> _updateIpAddress() async {
@@ -221,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _addLog("TEST", "whatsapp", "Local UI", "Launching WhatsApp for $number...", true, LogType.info);
 
     try {
-      final launched = await launchUrl(uri);
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched) {
         throw "Could not launch WhatsApp. Is it installed?";
       }
@@ -235,6 +264,72 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _startWhatsappBulk() async {
+    final numbersText = _phoneController.text.trim();
+    final message = _messageController.text.trim();
+
+    if (numbersText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter phone numbers"), backgroundColor: Colors.amber),
+      );
+      return;
+    }
+
+    final numbers = numbersText.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    if (numbers.length <= 1) {
+      return _sendTestWhatsapp();
+    }
+
+    setState(() {
+      _isWhatsappBulkMode = true;
+      _whatsappQueue = List.from(numbers);
+      _whatsappMessage = message;
+      _whatsappSuccessCount = 0;
+      _whatsappTotalCount = numbers.length;
+      _waitingForWhatsAppReturn = false;
+    });
+
+    _addLog("TEST", "whatsapp_bulk", "Local UI", "Starting WhatsApp Bulk Queue (${numbers.length} numbers)...", true, LogType.info);
+    _launchNextWhatsappQueueItem();
+  }
+
+  Future<void> _launchNextWhatsappQueueItem() async {
+    if (_whatsappQueue.isEmpty) {
+      setState(() {
+        _isWhatsappBulkMode = false;
+      });
+      _addLog("TEST", "whatsapp_bulk", "Local UI", "Bulk WhatsApp Queue Finished! Sent: $_whatsappSuccessCount/$_whatsappTotalCount", true, LogType.request);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("WhatsApp Bulk Complete: $_whatsappSuccessCount/$_whatsappTotalCount sent"),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+      }
+      return;
+    }
+
+    final number = _whatsappQueue.first.replaceAll(RegExp(r'[^\d+]'), '');
+    final uri = Uri.parse("whatsapp://send?phone=$number&text=${Uri.encodeComponent(_whatsappMessage)}");
+    
+    _addLog("TEST", "whatsapp_bulk", "Local UI", "Launching WhatsApp for $number...", true, LogType.info);
+
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (launched) {
+        _waitingForWhatsAppReturn = true;
+        _whatsappSuccessCount++;
+      } else {
+        throw "Could not launch WhatsApp.";
+      }
+    } catch (e) {
+      _addLog("TEST", "whatsapp_bulk", "Local UI", e.toString(), false, LogType.error);
+      _whatsappQueue.removeAt(0);
+      _launchNextWhatsappQueueItem();
     }
   }
 
@@ -683,6 +778,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _isWhatsappBulkMode ? () {
+                setState(() {
+                  _isWhatsappBulkMode = false;
+                  _whatsappQueue.clear();
+                });
+                _addLog("TEST", "whatsapp_bulk", "Local UI", "Bulk WhatsApp Cancelled by user", false, LogType.error);
+              } : _startWhatsappBulk,
+              icon: Icon(_isWhatsappBulkMode ? Icons.cancel : Icons.mark_chat_read_rounded, size: 18),
+              label: Text(_isWhatsappBulkMode ? "CANCEL WHATSAPP BULK" : "WHATSAPP BULK QUEUE"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isWhatsappBulkMode ? Colors.red.shade900 : const Color(0xFF128C7E),
+              ),
             ),
           ],
         ),
